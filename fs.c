@@ -13,6 +13,8 @@
 #define INODES_PER_BLOCK   128
 #define POINTERS_PER_INODE 5
 #define POINTERS_PER_BLOCK 1024
+#define SUCCESS    1
+#define FAILURE    0
 
 struct fs_superblock {
 	int magic;
@@ -35,9 +37,46 @@ union fs_block {
 	char data[DISK_BLOCK_SIZE];
 };
 
-int fs_format()
-{
-	return 0;
+union fs_block fsmb;
+int ismounted = 0;
+
+int fs_format(){
+
+	int node;
+	int block = 1;
+	int inodeBlocks;
+	int dNode;
+	int oneTenthBlock = .1 * disk_size();
+	inodeBlocks = oneTenthBlock + 1;
+
+
+	// attempt to format an already-mounted disk does nothing and returns failure.
+	if(ismounted){
+		return FAILURE;
+	}
+
+	fsmb.super.magic = FS_MAGIC;
+	fsmb.super.nblocks = disk_size();
+	fsmb.super.ninodeblocks = inodeBlocks;
+	fsmb.super.ninodes = INODES_PER_BLOCK * 5;
+	disk_write(0, fsmb.data);
+
+	//make all the nodes invalid and set size equal to 0
+	while(block < inodeBlocks + 1) {
+		for(node = 0; node < INODES_PER_BLOCK; node++) {
+			fsmb.inode[node].isvalid = 0;
+			fsmb.inode[node].size = 0;
+			for(dNode = 0; dNode < POINTERS_PER_INODE; dNode++){
+				fsmb.inode[node].direct[dNode] = 0;
+				fsmb.inode[node].indirect = 0;
+			}//end of for loop
+		} //end of for loop
+
+		disk_write(block, fsmb.data);
+		block++;
+	} //end of while loop
+
+	return SUCCESS;
 }
 
 void fs_debug(){
@@ -64,8 +103,8 @@ void fs_debug(){
 				int dNode; //direct block node
 
 				for(dNode = 0; dNode < POINTERS_PER_INODE; dNode++) {
-					if(block.inode[node].direct[dNode] != 1)
-						printf(" %d", block.inode[node].direct[dNode]);
+					if(block.inode[node].direct[dNode] != 0)
+					printf(" %d", block.inode[node].direct[dNode]);
 				}
 				printf("\n");
 				int idNode = block.inode[node].indirect;
@@ -77,8 +116,10 @@ void fs_debug(){
 					int idBlock;
 					printf("    indirect data blocks: ");
 					for(idBlock = 0; idBlock < POINTERS_PER_BLOCK; idBlock++) {
-						if(block.pointers[idBlock] == 1)
-						printf(" %d",block.pointers[idBlock]);
+						if(block.pointers[idBlock] != 0){
+							printf(" %d",block.pointers[idBlock]);
+						}
+
 					}
 					printf("\n");
 
@@ -89,37 +130,38 @@ void fs_debug(){
 			} //end of for loop
 
 		} //end of while loop
-			numBlocks++;
+		numBlocks++;
 	} //end of void function
 }
 
 
-	int fs_mount()
-	{
-		return 0;
-	}
+int fs_mount()
+{
 
-	int fs_create()
-	{
-		return 0;
-	}
+	return 0;
+}
 
-	int fs_delete( int inumber )
-	{
-		return 0;
-	}
+int fs_create()
+{
+	return 0;
+}
 
-	int fs_getsize( int inumber )
-	{
-		return -1;
-	}
+int fs_delete( int inumber )
+{
+	return 0;
+}
 
-	int fs_read( int inumber, char *data, int length, int offset )
-	{
-		return 0;
-	}
+int fs_getsize( int inumber )
+{
+	return -1;
+}
 
-	int fs_write( int inumber, const char *data, int length, int offset )
-	{
-		return 0;
-	}
+int fs_read( int inumber, char *data, int length, int offset )
+{
+	return 0;
+}
+
+int fs_write( int inumber, const char *data, int length, int offset )
+{
+	return 0;
+}
