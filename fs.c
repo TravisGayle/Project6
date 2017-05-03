@@ -1,3 +1,5 @@
+// Travis Gayle & Nick Palutsis
+// May 3, 2017
 
 #include "fs.h"
 #include "disk.h"
@@ -71,7 +73,7 @@ int fs_format(){
 
 	// attempt to format an already-mounted disk does nothing and returns failure.
 	if(isMounted){
-		printf("the disk has already been mounted\n");
+		printf("error: the disk has already been mounted\n");
 		return FAILURE;
 	}
 
@@ -158,7 +160,7 @@ int fs_mount()
 {
 	// attempt to mount an already-mounted disk does nothing and returns failure.
 	if (isMounted) {
-		printf("the disk has already been mounted\n");
+		printf("error: the disk has already been mounted\n");
 		return 0;
 	}
 
@@ -166,7 +168,7 @@ int fs_mount()
 	disk_read(0, block.data);
 	int i, j, k;
 
-	numInodes = block.super.ninodeblocks * INODES_PER_BLOCK;		// initialize inode table
+	numInodes = INODES_PER_BLOCK * block.super.ninodeblocks;		// initialize inode table
 	inodeTable = malloc(numInodes * sizeof(int));
 	for (i = 0; i < numInodes; i++)			// fill inode table
 		inodeTable[i] = 0;
@@ -211,7 +213,7 @@ int fs_mount()
 int fs_create()
 {
 	if (!isMounted) {
-		printf("please mount the disk first\n");
+		printf("error: please mount the disk first\n");
 		return 0;
 	}
 
@@ -241,7 +243,7 @@ int fs_create()
 int fs_delete( int inumber )
 {
 	if (!isMounted) {
-		printf("please mount the disk first\n");
+		printf("error: please mount the disk first\n");
 		return 0;
 	}
 
@@ -283,7 +285,7 @@ int fs_delete( int inumber )
 int fs_getsize( int inumber )
 {
 	if (!isMounted) {
-		printf("please mount the disk first\n");
+		printf("error: please mount the disk first\n");
 		return 0;
 	}
 
@@ -306,98 +308,107 @@ int fs_getsize( int inumber )
 int fs_read( int inumber, char *data, int length, int offset )
 {
 	if (!isMounted) {
-		printf("please mount the disk first\n");
+		printf("error: please mount the disk first\n");
 		return 0;
 	}
 
 	union fs_block block;
 	struct fs_inode inode;
 
-	disk_read(0, block.data);
+	disk_read(0, block.data);		// read super block
 	
-	if (inumber < 0 || inumber > block.super.ninodes)
+	if (inumber < 0 || inumber > block.super.ninodes) {		// check for valid input
+		printf("error: the value is out of the acceptable range\n");
 		return 0;
+	}
 
-	numInodes = (block.super.ninodeblocks * INODES_PER_BLOCK);
+	numInodes = (INODES_PER_BLOCK * block.super.ninodeblocks);
  
 	int i, j;
-	int currbyte = 0, first = 0;
+	int currentByte = 0;
+	int first = 0;
 	inode_load(inumber, &inode);
 
-	if (inode.isvalid == 0)
+	if (!inode.isvalid) {		// check if inode is valid
+		printf("error: inode is invalid\n");
 		return 0;
+	}
 
-	if(offset >= inode.size)
+	if(offset >= inode.size) {		// check if offset is appropriate
+		printf("error: offset is too large\n");
 		return 0;
+	}
 
 	int startBlock = (int)(offset / DISK_BLOCK_SIZE);
-	int curroffset = offset % 4096;
+	int currentOffset = offset % 4096;
 
-	for (i = startBlock; i < POINTERS_PER_INODE; i++) {
+	for (i = startBlock; i < POINTERS_PER_INODE; i++) {		// loop through inode pointers
 		if (inode.direct[i]) {
-			if (first == 0) {
+			if (first) {
 				disk_read(inode.direct[i], block.data);
-				for (j = 0; j+curroffset < DISK_BLOCK_SIZE; j++) {
-					if (block.data[j+curroffset]) {
-						data[currbyte] = block.data[j+curroffset];
-						currbyte++;
-						if (currbyte+offset >= inode.size) {
-							return currbyte;
-						}
-					}
-					else {
-						return currbyte;
-					}
-					if (currbyte == length) {
-						return currbyte;
-					}
-				} 
-				first = 1;
-			} else {
-				disk_read(inode.direct[i], block.data);
+
 				for (j = 0; j < DISK_BLOCK_SIZE; j++){
 					if(block.data[j]){
-						data[currbyte] = block.data[j];
-						currbyte++;
-						if (currbyte+offset >= inode.size)
-							return currbyte;
+						data[currentByte] = block.data[j];
+						currentByte++;
+						if (currentByte + offset >= inode.size)
+							return currentByte;
 
 					} else
-						return currbyte;
+						return currentByte;
 
-					if (currbyte == length)
-						return currbyte;
+					if (length == currentByte)
+						return currentByte;
 				} 
+			} else {
+				disk_read(inode.direct[i], block.data);
+
+				for (j = 0; j + currentOffset < DISK_BLOCK_SIZE; j++) {
+					if (block.data[j + currentOffset]) {
+						data[currentByte] = block.data[j + currentOffset];
+						currentByte++;
+
+						if (currentByte + offset >= inode.size)
+							return currentByte;
+					} else
+						return currentByte;
+
+					if (currentByte == length)
+						return currentByte;
+				} 
+				first = 1;
 			}
 		}
 	}
 
-	//Indirect nodes here
+	// handle indirect nodes
 	union fs_block indirectBlock;
 	int startIndirect = startBlock - 5;
 
 	if (inode.indirect) {
 		disk_read(inode.indirect, indirectBlock.data);
+
 		for (i = startIndirect; i < POINTERS_PER_BLOCK; i++) {
 			if (indirectBlock.pointers[i]) {
 				disk_read(indirectBlock.pointers[i], block.data);
-				for(j = 0; j < DISK_BLOCK_SIZE; j++) {
-					if (block.data[j]) {
-						data[currbyte] = block.data[j];
-						currbyte++;
-						if (currbyte+offset >= inode.size)
-							return currbyte;
-					} else
-						return currbyte;
 
-					if (currbyte == length)
-						return currbyte;
+				for (j = 0; j < DISK_BLOCK_SIZE; j++) {
+					if (block.data[j]) {
+						data[currentByte] = block.data[j];
+						currentByte++;
+						if (currentByte + offset >= inode.size)
+							return currentByte;
+					} else
+						return currentByte;
+
+					if (currentByte == length)
+						return currentByte;
 				} 
 			}
 		}
 	}
 	
-	return currbyte;
+	return currentByte;
 }
 
 int fs_write( int inumber, const char *data, int length, int offset )
@@ -410,23 +421,27 @@ int fs_write( int inumber, const char *data, int length, int offset )
 	union fs_block block;
 	struct fs_inode inode;
 	
-	// read the superblock and do checks
-	disk_read(0, block.data);
+	disk_read(0, block.data);		// read super block
 	
-	if (inumber < 0 || inumber > block.super.ninodes)
+	if (inumber < 0 || inumber > block.super.ninodes) {		// check for valid input
+		printf("error: the value is out of the acceptable range\n");
 		return 0;
+	}
 
-	numInodes = (block.super.ninodeblocks*INODES_PER_BLOCK);
 	int nonDiskBlocks = (block.super.ninodeblocks+1);
-
-
 	int i, j, k;
-	int currbyte = 0, first = 0;
-	inode_load(inumber, &inode);
-	if (inode.isvalid == 0)
-		return 0;
+	int currentByte = 0;
+	int first = 0;
+	numInodes = (INODES_PER_BLOCK * block.super.ninodeblocks);
 
-	if (inode.isvalid == 1 && inode.size > 0) {
+	inode_load(inumber, &inode);
+
+	if (!inode.isvalid) {		// check for valid node
+		printf("error: the inode is invalid\n");
+		return 0;
+	}
+
+	if (inode.isvalid && inode.size > 0) {
 		for (i = 0; i < POINTERS_PER_INODE; i++) {
 			if (inode.direct[i])
 				bitmap[inode.direct[i]] = 0;
@@ -434,62 +449,71 @@ int fs_write( int inumber, const char *data, int length, int offset )
 		if (inode.indirect) {
 			disk_read(inode.indirect, block.data);
 			bitmap[inode.indirect] = 0;
+
 			for (j = 0; j < POINTERS_PER_BLOCK; j++) {
-				if (block.pointers[j]) {
+				if (block.pointers[j])
 					bitmap[block.pointers[j]] = 0;
-				}
 			}
 		}
 	}
 
-	int startBlock = (int)(offset/DISK_BLOCK_SIZE);
-	int curroffset = offset%4096;
-	for (i = startBlock; i < POINTERS_PER_INODE; i++) {
-		// go through bitmap to look for empty block
-		for (k = nonDiskBlocks; k < bitmapSize; k++) {
-			if (bitmap[k]==0) {
-				inode.direct[i] = k;
+	int startBlock = (int)(offset / DISK_BLOCK_SIZE);
+	int currentOffset = offset % 4096;
+
+	for (i = startBlock; i < POINTERS_PER_INODE; i++) {		// loop through inode pointers
+		for (k = nonDiskBlocks; k < bitmapSize; k++) {		// loop through bitmap
+			if (bitmap[k] == 0) {		// look for empty block
 				bitmap[k] = 1;
+				inode.direct[i] = k;
+
 				break;
 			}
 		}
-		if (first == 0) {
+
+		if (first) {
 			disk_read(inode.direct[i], block.data);
-			for (j = 0; j+curroffset < DISK_BLOCK_SIZE; j++) {
-				block.data[j+curroffset] = data[currbyte];
-				currbyte++;
-				if (currbyte == length) {
+
+			for (j = 0; j < DISK_BLOCK_SIZE; j++) {		// loop through block
+				block.data[j] = data[currentByte]; 
+				currentByte++;
+
+				if (length == currentByte) {
 					disk_write(inode.direct[i], block.data);
-					inode.size = currbyte + offset;
+					inode.size = currentByte + offset;
 					inode_save(inumber, &inode);
-					return currbyte;
+
+					return currentByte;
 				}
 			} 
-			first = 1;
 			disk_write(inode.direct[i], block.data);
 		} else {
 			disk_read(inode.direct[i], block.data);
-			for (j = 0; j < DISK_BLOCK_SIZE; j++) {
-				block.data[j] = data[currbyte]; 
-				currbyte++;
-				if (currbyte == length) {
+
+			for (j = 0; j+currentOffset < DISK_BLOCK_SIZE; j++) {		// loop through block
+				block.data[j + currentOffset] = data[currentByte];
+				currentByte++;
+
+				if (currentByte == length) {
 					disk_write(inode.direct[i], block.data);
-					inode.size = currbyte + offset;
+					inode.size = currentByte + offset;
 					inode_save(inumber, &inode);
-					return currbyte;
+
+					return currentByte;
 				}
 			} 
 			disk_write(inode.direct[i], block.data);
-		}
+			first = 1;
+		} 
 	}
 
-	//Indirect nodes here
+	// handle indirect nodes
 	union fs_block indirectBlock;
-	// go through bitmap to look for empty block
-	for (k = nonDiskBlocks; k < bitmapSize; k++) {
-		if (!bitmap[k]) {
-			inode.indirect = k;
+
+	for (k = nonDiskBlocks; k < bitmapSize; k++) {		// loop through bitmap
+		if (!bitmap[k]) {		// look for empty block
 			bitmap[k] = 1;
+			inode.indirect = k;
+
 			break;
 		}
 	}
@@ -498,25 +522,29 @@ int fs_write( int inumber, const char *data, int length, int offset )
 
 	if (inode.indirect) {
 		disk_read(inode.indirect, indirectBlock.data);
+
 		for (i = startIndirect; i < POINTERS_PER_BLOCK; i++) {
-			// go through bitmap to look for empty block
-			for (k = nonDiskBlocks; k < bitmapSize; k++) {
-				if (!bitmap[k]) {
-					indirectBlock.pointers[i] = k;
+			for (k = nonDiskBlocks; k < bitmapSize; k++) {		// loop through bitmap
+				if (!bitmap[k]) {		// look for empty block
 					bitmap[k] = 1;
+					indirectBlock.pointers[i] = k;
+
 					break;
 				}
 			}
 
 			disk_read(indirectBlock.pointers[i], block.data);
+
 			for (j = 0; j < DISK_BLOCK_SIZE; j++) {
-				block.data[j] = data[currbyte]; 
-				currbyte++;
-				if (currbyte == length){
+				block.data[j] = data[currentByte]; 
+				currentByte++;
+
+				if (currentByte == length){
 					disk_write(indirectBlock.pointers[i], block.data);
-					inode.size = currbyte + offset;
+					inode.size = currentByte + offset;
 					inode_save(inumber, &inode);
-					return currbyte;
+
+					return currentByte;
 				}
 			} 
 			disk_write(indirectBlock.pointers[i], block.data);
@@ -524,8 +552,7 @@ int fs_write( int inumber, const char *data, int length, int offset )
 		disk_write(inode.indirect, indirectBlock.data);
 	}
 
-	// update inode's size
-	inode.size = currbyte + offset;
+	inode.size = currentByte + offset;		// update inode size
 	inode_save(inumber, &inode);
-	return currbyte;
+	return currentByte;
 }
