@@ -1,3 +1,3 @@
 # Project6
 
-This is blank
+Partners: Nick Palutsis & Travis Gayle
